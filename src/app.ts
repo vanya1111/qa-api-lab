@@ -1,7 +1,9 @@
 import express from 'express';
+import type { RequestHandler } from 'express';
 import { randomUUID } from 'node:crypto';
 
 type Tier = 'basic' | 'silver' | 'gold';
+type Role = 'user' | 'admin';
 interface Item {
   sku: string;
   price: number;
@@ -23,12 +25,21 @@ const USERS = [
     email: 'alice@example.com',
     password: 'Secret123',
     tier: 'gold' as Tier,
+    role: 'user' as Role,
   },
   {
     id: 'u2',
     email: 'bob@example.com',
     password: 'Secret123',
     tier: 'basic' as Tier,
+    role: 'user' as Role,
+  },
+  {
+    id: 'u3',
+    email: 'admin@example.com',
+    password: 'Secret123',
+    tier: 'basic' as Tier,
+    role: 'admin' as Role,
   },
 ];
 const DISCOUNT: Record<Tier, number> = { basic: 0, silver: 0.05, gold: 0.1 };
@@ -54,13 +65,23 @@ export function createApp() {
     res.json({ accessToken: token });
   });
 
-  app.use('/orders', (req, res, next) => {
+  const authenticate: RequestHandler = (req, res, next) => {
     const token = req.headers.authorization?.replace('Bearer ', '');
     const userId = token ? tokens.get(token) : undefined;
     if (!userId) return res.status(401).json({ code: 'UNAUTHORIZED' });
     res.locals.user = USERS.find((u) => u.id === userId);
     next();
-  });
+  };
+
+  const requireAdmin: RequestHandler = (_req, res, next) => {
+    if (res.locals.user.role !== 'admin') {
+      return res.status(403).json({ code: 'FORBIDDEN' });
+    }
+    next();
+  };
+
+  app.use('/orders', authenticate);
+  app.use('/admin', authenticate, requireAdmin);
 
   app.post('/orders', (req, res) => {
     const items: Item[] = req.body?.items;
@@ -115,6 +136,12 @@ export function createApp() {
     }
     orders.delete(order.id);
     res.status(204).end();
+  });
+
+  // Варіант 10: усі замовлення бачить лише адміністратор.
+  // На відміну від публічної відповіді, тут повертається власник (ownerId).
+  app.get('/admin/orders', (_req, res) => {
+    res.json([...orders.values()]);
   });
 
   return app;
